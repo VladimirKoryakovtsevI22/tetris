@@ -3,6 +3,8 @@ package com.example.tetris
 import android.graphics.Color
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.util.Log
+import android.view.MotionEvent
 import android.widget.GridLayout
 import android.widget.ImageView
 import android.widget.TextView
@@ -11,7 +13,7 @@ import com.example.tetris.databinding.ActivityPlayBinding
 
 class PlayActivity : AppCompatActivity() {
     private lateinit var binding: ActivityPlayBinding
-    private lateinit var tetrisGame: TetrisGame
+    lateinit var tetrisGame: TetrisGame
     private lateinit var gameBoardView: GameBoardView
     private lateinit var gameBoard: GridLayout
 
@@ -26,6 +28,19 @@ class PlayActivity : AppCompatActivity() {
         tetrisGame = TetrisGame(gameBoardView, this)
         tetrisGame.setBoardUpdateListener(gameBoardView)
         tetrisGame.startGame()
+
+
+        binding.linearLeft.setOnClickListener {
+//            tetrisGame.moveLeft()
+        }
+
+        binding.linearRight.setOnClickListener {
+//            tetrisGame.moveRight()
+        }
+
+        binding.linearRotate.setOnClickListener {
+//            tetrisGame.rotateTetromino()
+        }
 
     }
 
@@ -45,7 +60,6 @@ class PlayActivity : AppCompatActivity() {
     private fun startNewGame() {
         tetrisGame.startGame()
     }
-
 
 
 }
