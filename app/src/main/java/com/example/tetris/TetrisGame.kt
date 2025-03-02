@@ -1,10 +1,14 @@
 package com.example.tetris
 
 import android.content.Context
-import android.text.Selection.moveDown
+import android.util.Log
 import androidx.appcompat.app.AlertDialog
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.concurrent.thread
-
 
 class TetrisGame(
     private val gameBoardView: GameBoardView,
@@ -23,12 +27,13 @@ class TetrisGame(
     var score = 0
 
     var listener: BoardUpdateListener? = null
+    private val lock = Any() // Объект для синхронизации
 
     fun setBoardUpdateListener(listener: BoardUpdateListener) {
         this.listener = listener
     }
 
-    fun startCoord(shape: Array<IntArray>): Array<Array<Cell>> {
+    fun startCoord(shape: Array<IntArray>): Array<Cell> {
         val height = shape.size
         val width = shape[0].size
 
@@ -36,20 +41,19 @@ class TetrisGame(
         val startX = (fieldCenterX / 2) - (width / 2)  // Центр по оси X
         val startY = 0
 
-        val blocks = Array(height) { Array(width) { Cell() } }
+        val blocks = ArrayList<Cell>()
 
         for (blockY in 0 until height) {
             for (blockX in 0 until width) {
                 if (shape[blockY][blockX] == 1) {
-                    blocks[blockY][blockX] =
-                        Cell(startX + blockX, startY + blockY, isOccupied = true)
-                } else {
-                    blocks[blockY][blockX] = Cell()
+                    blocks.add(Cell(startX + blockX, startY + blockY, isOccupied = true))
                 }
             }
         }
 
-        return blocks
+        val blocksArray: Array<Cell> = blocks.toArray(arrayOf<Cell>())
+
+        return blocksArray
     }
 
     fun newTetromino() {
@@ -68,28 +72,27 @@ class TetrisGame(
     }
 
     fun placeTetromino(tetromino: Tetromino) {
-        for (y in tetromino.blocks.indices) {
-            for (x in tetromino.blocks[y].indices) {
-                if (tetromino.blocks[y][x].isOccupied) {
-                    val currX = tetromino.blocks[y][x].x
-                    val currY = tetromino.blocks[y][x].y
+        synchronized(lock) {
+            for (i in tetromino.blocks.indices) {
+                if (tetromino.blocks[i].isOccupied) {
+                    val currX = tetromino.blocks[i].x
+                    val currY = tetromino.blocks[i].y
                     if (currY in board.indices && currX in board[0].indices) {
                         board[currY][currX] = tetromino
                     }
                 }
             }
         }
+        Log.d("MyLog", "Функция placeTetromino устанавили тетромину")
+
     }
 
-
     fun checkInitialCollision(tetromino: Tetromino): Boolean {
-        // по x проверяет выходит ли за боковые границы
-        // по y чекает не выходит ли за дно
-        for (y in tetromino.blocks.indices) {
-            for (x in tetromino.blocks[y].indices) {
-                if (tetromino.blocks[y][x].isOccupied) {
-                    val curX = tetromino.blocks[y][x].x
-                    val curY = tetromino.blocks[y][x].y
+        synchronized(lock) {
+            for (i in tetromino.blocks.indices) {
+                if (tetromino.blocks[i].isOccupied) {
+                    val curX = tetromino.blocks[i].x
+                    val curY = tetromino.blocks[i].y
 
                     if (curX !in 0 until BOARD_WIDTH || curY >= BOARD_HEIGHT) {
                         return true
@@ -100,16 +103,16 @@ class TetrisGame(
                     }
                 }
             }
+            return false
         }
-        return false
     }
 
     fun checkCollision(tetromino: Tetromino): Boolean {
-        for (y in tetromino.blocks.indices) {
-            for (x in tetromino.blocks[y].indices) {
-                if (tetromino.blocks[y][x].isOccupied) {
-                    val curX = tetromino.blocks[y][x].x
-                    val curY = tetromino.blocks[y][x].y + 1
+        synchronized(lock) {
+            for (i in tetromino.blocks.indices) {
+                if (tetromino.blocks[i].isOccupied) {
+                    val curX = tetromino.blocks[i].x
+                    val curY = tetromino.blocks[i].y + 1
 
                     // Проверка выхода за нижнюю границу
                     if (curY >= BOARD_HEIGHT) {
@@ -122,8 +125,8 @@ class TetrisGame(
                     }
                 }
             }
+            return false
         }
-        return false
     }
 
     fun startGame(): Boolean {
@@ -132,174 +135,195 @@ class TetrisGame(
         score = 0
         board = Array(BOARD_HEIGHT) { Array(BOARD_WIDTH) { Tetromino() } }
 
-        thread {
+        CoroutineScope(Dispatchers.Default).launch {
             while (!gameOver) {
                 newTetromino()
                 if (gameOver) break
 
                 while (!checkCollision(currentTetromino!!)) {
+                    listener?.onBoardUpdated(board)
                     moveDown()
-                    Thread.sleep(500)
-//                    break
-
+                    clearFullLines()
+                    delay(1000) // Неблокирующая задержка
                 }
             }
 
-            // После завершения игры, вызываем showAlert в главном потоке
-            (context as? PlayActivity)?.runOnUiThread {
+            // Обновление UI в основном потоке
+            withContext(Dispatchers.Main) {
                 (context as? PlayActivity)?.showAlert(score)
             }
         }
         return true
     }
 
-    fun moveDown() {
-        currentTetromino?.let { tetromino ->
-            removeTetromino(tetromino)
+    fun rotateFigure(): Tetromino {
+        synchronized(lock) {
+            val figure = currentTetromino!!.blocks
+            val centerX = figure.sumOf { it.x } / figure.size
+            val centerY = figure.sumOf { it.y } / figure.size
 
-            // Проверяем, можно ли двигаться дальше
-            if (!checkCollision(tetromino)) {
-//                println("all good")
-                for (row in tetromino.blocks) {
-                    for (cell in row) {
+            // Перезаписываем координаты каждой клетки
+            figure.forEach { cell ->
+                val newX = (cell.y - centerY) + centerX
+                val newY = -(cell.x - centerX) + centerY
+                cell.x = newX
+                cell.y = newY
+            }
+            return Tetromino(currentTetromino!!.shape, isOccupied = true, blocks = figure)
+        }
+    }
+
+    fun rotateTetromino() {
+        synchronized(lock) {
+            currentTetromino?.let { tetromino ->
+                val rotated = rotateFigure()
+                if (checkCollision(tetromino) && checkCollision(rotated)) {
+                    removeTetromino(tetromino)
+                    currentTetromino = rotated
+                    placeTetromino(currentTetromino!!)
+                    listener?.onBoardUpdated(board)
+                }
+            }
+        }
+    }
+
+    fun quicklyMoveDown() {
+        currentTetromino?.let { tetromino ->
+            synchronized(lock) {
+                // Продолжаем двигать фигуру вниз, пока это возможно
+                while (!checkCollision(tetromino)) {
+                    removeTetromino(tetromino)
+                    for (cell in tetromino.blocks) {
                         if (cell.isOccupied) {
                             cell.y += 1
                         }
                     }
+                    placeTetromino(tetromino)
+                    listener?.onBoardUpdated(board)
                 }
-            } else {
+
                 placeTetromino(tetromino)
                 clearFullLines()
-                return
+                listener?.onBoardUpdated(board)
             }
+        }
+    }
 
-            placeTetromino(tetromino)
-            listener?.onBoardUpdated(board)
+    fun moveDown() {
+        synchronized(lock) {
+            currentTetromino?.let { tetromino ->
+                Log.d("MyLog", "Функция moveDown")
+                removeTetromino(tetromino)
+
+                // Проверяем, можно ли двигаться дальше
+                if (!checkCollision(tetromino)) {
+                    for (cell in tetromino.blocks) {
+                        if (cell.isOccupied) {
+                            cell.y += 1
+                        }
+                    }
+                } else {
+                    placeTetromino(tetromino)
+                    clearFullLines()
+                    return
+                }
+                Log.d("MyLog", "Функция moveDown вызов placeTetromino")
+
+                placeTetromino(tetromino)
+                listener?.onBoardUpdated(board)
+            }
+        }
+    }
+
+    fun moveLeft() {
+        synchronized(lock) {
+            currentTetromino?.let {
+                if (canMove(it, -1, 0)) {
+                    removeTetromino(it)
+                    for (cell in it.blocks) {
+                        if (cell.isOccupied) {
+                            cell.x -= 1
+                        }
+                    }
+
+                    placeTetromino(it)
+                    gameBoardView.onBoardUpdated(board)
+                }
+            }
+        }
+    }
+
+    fun moveRight() {
+        synchronized(lock) {
+            currentTetromino?.let {
+                if (canMove(it, 1, 0)) {
+                    removeTetromino(it)
+                    for (cell in it.blocks) {
+                        if (cell.isOccupied) {
+                            cell.x += 1
+                        }
+                    }
+
+                    placeTetromino(it)
+                    gameBoardView.onBoardUpdated(board)
+                }
+            }
+        }
+    }
+
+    fun canMove(tetromino: Tetromino, dx: Int, dy: Int): Boolean {
+        synchronized(lock) {
+            for (i in tetromino.blocks.indices) {
+                if (tetromino.blocks[i].isOccupied) {
+                    var curX = tetromino.blocks[i].x + dx
+                    var curY = tetromino.blocks[i].y + dy
+
+                    // Проверяем выход за границы игрового поля
+                    if (curX < 0 || curX >= BOARD_WIDTH || curY >= BOARD_HEIGHT) {
+                        return false
+                    }
+
+                    // Проверяем столкновение с другими фигурами
+                    if (board[curY][curX].isOccupied && board[curY][curX] != currentTetromino) {
+                        return false
+                    }
+                }
+            }
+            return true
         }
     }
 
     fun removeTetromino(tetromino: Tetromino) {
-        for (y in tetromino.blocks.indices) {
-            for (x in tetromino.blocks[y].indices) {
-                if (tetromino.blocks[y][x].isOccupied) {
-                    val curX = tetromino.blocks[y][x].x
-                    val curY = tetromino.blocks[y][x].y
+        synchronized(lock) {
+            for (i in tetromino.blocks.indices) {
+                if (tetromino.blocks[i].isOccupied) {
+                    var curX = tetromino.blocks[i].x
+                    var curY = tetromino.blocks[i].y
 
                     if (curY in board.indices && curX in board[0].indices) {
                         board[curY][curX] = Tetromino()
                     }
                 }
             }
+            Log.d("MyLog", "удаляем tetromin")
         }
     }
 
     fun clearFullLines() {
-        val remainingRows = board.filterNot { row -> row.all { it.isOccupied } }
-        val numCleared = BOARD_HEIGHT - remainingRows.size
+        synchronized(lock) {
+            val remainingRows = board.filterNot { row -> row.all { it.isOccupied } }
+            val numCleared = BOARD_HEIGHT - remainingRows.size
 
-        if (numCleared > 0) {
-            score += numCleared * 100
-            val emptyRows = Array(numCleared) { Array(BOARD_WIDTH) { Tetromino() } }
-            board = emptyRows + remainingRows.toTypedArray()
-            listener?.onBoardUpdated(board)
+            if (numCleared > 0) {
+                score += numCleared * 100
+                val emptyRows = Array(numCleared) { Array(BOARD_WIDTH) { Tetromino() } }
+                board = emptyRows + remainingRows.toTypedArray()
+                listener?.onBoardUpdated(board)
+            }
         }
     }
 }
 
-
-
-
-
-//    fun canMove(tetromino: Tetromino, dx: Int, dy: Int): Boolean {
-//        val shape = tetromino.shape ?: return false  // Если shape == null, движение невозможно
-//
-//        for (row in shape.indices) {
-//            for (col in shape[row].indices) {
-//                if (shape[row][col] == 1) {  // Проверяем только занятые клетки фигуры
-//                    val newX = tetromino.x + col + dx
-//                    val newY = tetromino.y + row + dy
-//
-//                    // Проверяем выход за границы игрового поля
-//                    if (newX < 0 || newX >= BOARD_WIDTH || newY >= BOARD_HEIGHT) {
-//                        return false
-//                    }
-//
-//                    // Проверяем столкновение с другими фигурами
-//                    if (board[newY][newX].isOccupied && board[newY][newX] != currentTetromino) {
-//                        return false
-//                    }
-//                }
-//            }
-//        }
-//        return true
-//    }
-
-
-//        for (y in tetromino.shape!!.indices) {
-//            for (x in tetromino.shape!![y].indices) {
-//                if (tetromino.shape!![y][x] == 1) {
-//                    val newX = tetromino.x + x
-//                    val newY = tetromino.y + y
-//
-//                    // Проверка выхода за границы
-//                    if (newX !in 0 until BOARD_WIDTH || newY >= BOARD_HEIGHT) {
-//                        return true
-//                    }
-//
-//                    // Проверка на занятость клетки (если newY >= 0, чтобы не проверять вне массива)
-//                    if (newY >= 0 && board[newY][newX].isOccupied) {
-//                        return true
-//                    }
-//                }
-//            }
-//        }
-//        return false
-//    }
-
-//    fun rotateTetromino() {
-//        currentTetromino?.let { tetromino ->
-//            val rotated = tetromino.rotate()
-//            if (checkCollision(tetromino)) {
-//                removeTetromino(tetromino)
-//                currentTetromino = rotated
-//                placeTetromino(rotated)
-//                listener?.onBoardUpdated(board)
-//            }
-//        }
-//    }
-
-//    fun moveLeft() {
-//        currentTetromino?.let {
-//            if (canMove(it, -1, 0)) {
-//                removeTetromino(it)
-//                it.x -= 1
-//                placeTetromino(it)
-//                gameBoardView.onBoardUpdated(board)
-//            }
-//        }
-////    }
-//
-//    fun moveRight() {
-//        currentTetromino?.let {
-//            if (canMove(it, 1, 0)) {
-//                removeTetromino(it)
-//                it.x += 1
-//                placeTetromino(it)
-//                gameBoardView.onBoardUpdated(board)
-//            }
-//        }
-//    }
-
-
-//
-
-
-
-
-
-
-
 interface BoardUpdateListener {
     fun onBoardUpdated(board: Array<Array<Tetromino>>)
 }
-

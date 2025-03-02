@@ -31,15 +31,19 @@ class PlayActivity : AppCompatActivity() {
 
 
         binding.linearLeft.setOnClickListener {
-//            tetrisGame.moveLeft()
+            tetrisGame.moveLeft()
         }
 
         binding.linearRight.setOnClickListener {
-//            tetrisGame.moveRight()
+            tetrisGame.moveRight()
         }
 
         binding.linearRotate.setOnClickListener {
-//            tetrisGame.rotateTetromino()
+            tetrisGame.rotateTetromino()
+        }
+
+        binding.linearDown.setOnClickListener {
+            tetrisGame.moveDown()
         }
 
     }
@@ -49,12 +53,12 @@ class PlayActivity : AppCompatActivity() {
         builder.setTitle("Игра окончена")
         builder.setMessage("Ваш счёт: $score\nХотите начать заново?")
         builder.setPositiveButton("Да") { dialog, which ->
-            startNewGame() // Перезапуск игры
+            startNewGame()
         }
         builder.setNegativeButton("Выход") { dialog, which ->
-            finish() // Закрыть активность
+            finish()
         }
-        builder.show() // Показываем диалог
+        builder.show()
     }
 
     private fun startNewGame() {
