@@ -3,6 +3,7 @@ package com.example.tetris
 import android.content.Context
 import android.util.Log
 import androidx.appcompat.app.AlertDialog
+import com.example.tetris.db.AppDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -19,6 +20,8 @@ class TetrisGame(
         const val BOARD_WIDTH = 10
         const val BOARD_HEIGHT = 20
     }
+
+
 
     var board = Array(BOARD_HEIGHT) { Array(BOARD_WIDTH) { Tetromino() } }
 
